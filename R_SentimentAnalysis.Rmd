@@ -1,0 +1,211 @@
+---
+title: "Airline Data Sentiment Analysis"
+author: 'Gursheen Kaur Anand(221)'
+output:
+  html_document:
+    theme: cosmo
+    toc: yes
+    toc_depth: '2'
+    df_print: paged
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  html_notebook:
+    theme: darkly
+    highlight: tango
+    toc: yes
+    number_sections: yes
+    toc_depth: 2
+---   
+
+# Preparations {.tabset}
+
+## Loading Libraries  
+
+
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+
+library(dplyr)   #Data manipulation
+
+library(forcats) #ggplot frequency
+
+library(ggplot2) #visualizations
+
+library(caTools) #Data wrangling
+
+library("tm")  # for text mining
+
+library("SnowballC") # for text stemming
+
+library("wordcloud") # word-cloud generator 
+
+library("RColorBrewer") # color palettes
+
+library(randomForest) #randomforest
+
+library(sentimentr)  
+
+```
+
+## Loading Data
+
+read the train and test datasets
+
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+df = read.csv("G:\\Gursheen\\R_NLP\\Tweets1.csv")
+
+```
+
+# Sentiment Analysis
+```{r}
+df$ave_sentiment=0
+df$sentiment=0
+df$positivereason="Unspecified"
+df$negativereason="Unspecified"
+for(i in 1:15){
+  sentiment=sentiment_by(df[i,4])
+  df[i,5]=sentiment$ave_sentiment
+  if(sentiment$ave_sentiment<0){
+    df[i,6]='negative'
+    df[i,9]=df[i,7]
+  }
+  else if(sentiment$ave_sentiment==0){
+    df[i,6]='neutral'
+  }
+  else if(sentiment$ave_sentiment>0){
+    df[i,6]='positive'
+    df[i,8]=df[i,7]
+  }
+}
+```
+
+
+# General Info
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+df
+```
+
+
+## Preliminary visual inspection
+
+### Total distribution of tweets with sentiment
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+#Total tweets distribution as negative,positive,neutral
+ggplot(df, aes(x = sentiment))+geom_bar(stat = "count")+
+geom_text(stat='count', aes(label=..count..), vjust=-1)
+```
+
+### Distribution of Negative Tweets and their Reasons
+
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+#fct_infreq is from package forcats (for frequency distribution)
+ggplot(df, aes(x = fct_infreq(factor(negativereason))))+geom_bar(stat = "count")+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+### Distribution of Sentiments for different Airlines.
+
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+ggplot(df, aes(x = airline,fill = sentiment ))+geom_bar(stat = "count")
+
+#only negative tweets
+
+ggplot(df,aes(x=ave_sentiment,fill=(sentiment=="negative" )))+geom_density()
+
+```
+
+
+### Distribution of Text length for various Sentiments
+
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+#creating a variable with text length of each tweet
+df$length = nchar(as.character(df$text))
+
+ggplot(df, aes(x = length, fill = sentiment))+ geom_density(alpha=0.5)+scale_x_continuous(name   = 'Tweet\nSentiment') +labs(x='Tweet Length') +theme(text = element_text(size=12)) 
+
+```
+
+
+
+## Findings
+
+\nOn Total, there are 5 negative tweets compared to 3 neutral 7 positive tweets. 
+\n Canceled Flight is the leading reason for negative tweets. 
+\n United Airlines has the most no. of positive tweets. 
+\n US Airways has the highest number of tweets. 
+\n Neutral Tweets are generally shorter compared to other tweets.
+
+
+# Most frequent terms used and a Wordcloud
+
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+# Load the data as a corpus
+docs <- VCorpus(VectorSource(df$text))
+#To replace special characters
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+docs <- tm_map(docs, toSpace, "/")
+docs <- tm_map(docs, toSpace, "@")
+docs <- tm_map(docs, toSpace, "\\|")
+#convert to lower case
+docs <- tm_map(docs,content_transformer(tolower))
+# Remove numbers
+docs <- tm_map(docs, removeNumbers)
+# Remove english common stopwords
+docs <- tm_map(docs, removeWords, stopwords("english"))
+# Remove punctuations
+docs <- tm_map(docs, removePunctuation)
+# Eliminate extra white spaces
+docs <- tm_map(docs, stripWhitespace)
+# Text stemming
+docs <- tm_map(docs, stemDocument)
+
+#Text to Matrix
+tdm <- TermDocumentMatrix(docs)
+m <- as.matrix(tdm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+head(d, 10)
+
+#word Cloud
+set.seed(1234)
+wordcloud(words = d$word, freq = d$freq, min.freq = 1,
+          max.words=200, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+# Basic Model
+
+## Document data
+
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+dtm = DocumentTermMatrix(docs)
+dtm = removeSparseTerms(dtm,sparse = 0.99)
+model_data = as.data.frame(as.matrix(dtm))
+model_data$sentiment = df$sentiment
+
+```
+
+## Seperate data
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+model_data$sentiment <- as.factor(model_data$sentiment)
+set.seed(123)
+split = sample.split(model_data$sentiment,SplitRatio = 0.9)
+train = subset(model_data,split = TRUE)
+test = subset(model_data,split = FALSE)
+```
+
+## Randomforest
+```{r echo = TRUE, message=FALSE, warning=FALSE}
+predict_rf = randomForest(x = train[,-159],y = train$sentiment,ntree = 10)
+y_pred = predict(predict_rf,newdata = test[,-159])
+y_pred
+
+#confusion matrix
+cm = table(test[,159],y_pred)
+cm
+#Accuracy
+sum(diag(cm))/sum(cm)
+
+```
+
+
+
